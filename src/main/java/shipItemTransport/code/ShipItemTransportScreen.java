@@ -1,4 +1,3 @@
-// ShipItemTransportScreen.java
 package shipItemTransport.code;
 
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -18,15 +17,17 @@ public class ShipItemTransportScreen extends AbstractContainerScreen<ShipItemTra
     private boolean currentImportMode;
     private int currentBlockCount;
     private int currentChestCount;
+    private String currentShipInfo;
 
     public ShipItemTransportScreen(ShipItemTransportMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
         this.imageWidth = 176;
-        this.imageHeight = 120; // Increased height to fit chest count
+        this.imageHeight = 140; // Increased height to fit ship connection info
         this.inventoryLabelY = 100000;
         this.currentImportMode = menu.isImportMode(); // Initialize with mode from server
         this.currentBlockCount = menu.getMultiblockSize(); // Initialize with block count from server
         this.currentChestCount = menu.getChestCount(); // Initialize with chest count from server
+        this.currentShipInfo = menu.getShipConnectionInfo(); // Initialize with ship connection info
     }
 
     @Override
@@ -48,7 +49,7 @@ public class ShipItemTransportScreen extends AbstractContainerScreen<ShipItemTra
                                 // Don't update locally - wait for server sync
                             }
                         })
-                .bounds(leftPos + 60, topPos + 70, 56, 20) // Moved down to make room for chest count
+                .bounds(leftPos + 60, topPos + 90, 56, 20) // Moved down to make room for ship info
                 .build());
     }
 
@@ -68,10 +69,21 @@ public class ShipItemTransportScreen extends AbstractContainerScreen<ShipItemTra
         super.render(guiGraphics, mouseX, mouseY, delta);
         renderTooltip(guiGraphics, mouseX, mouseY);
 
+        // Update ship info from menu (in case it changed via sync packet)
+        this.currentShipInfo = menu.getShipConnectionInfo();
+
         // Draw info using the synchronized values
         guiGraphics.drawString(this.font, "Connected Blocks: " + currentBlockCount, leftPos + 8, topPos + 20, 0x404040, false);
         guiGraphics.drawString(this.font, "Connected Chests: " + currentChestCount, leftPos + 8, topPos + 35, 0x404040, false);
         guiGraphics.drawString(this.font, "Mode: " + (currentImportMode ? "Import" : "Export"), leftPos + 8, topPos + 50, 0x404040, false);
+        guiGraphics.drawString(this.font, "Connected to: " + currentShipInfo, leftPos + 8, topPos + 65, 0x404040, false);
+
+        // Add some helpful info based on ship connection
+        if (currentShipInfo.equals("Ground")) {
+            guiGraphics.drawString(this.font, "Status: Ready for ship transfer", leftPos + 8, topPos + 80, 0x404040, false);
+        } else {
+            guiGraphics.drawString(this.font, "Status: Ship transport active", leftPos + 8, topPos + 80, 0x404040, false);
+        }
     }
 
     @Override
@@ -92,5 +104,13 @@ public class ShipItemTransportScreen extends AbstractContainerScreen<ShipItemTra
 
     public void updateChestCountFromServer(int serverChestCount) {
         this.currentChestCount = serverChestCount;
+    }
+
+    // UPDATED: Update ship connection info from sync packet
+    public void updateShipInfoFromServer(boolean isOnShip, long shipId) {
+        // Update the menu with the new ship info
+        menu.setShipInfo(isOnShip, shipId);
+        // Update our local display string
+        this.currentShipInfo = menu.getShipConnectionInfo();
     }
 }

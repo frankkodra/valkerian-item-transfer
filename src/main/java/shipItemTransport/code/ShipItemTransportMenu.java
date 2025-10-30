@@ -15,14 +15,25 @@ public class ShipItemTransportMenu extends AbstractContainerMenu {
     private boolean currentMode; // stores the mode from server
     private int currentBlockCount; // stores the block count from server
     private int currentChestCount; // stores the chest count from server
+    private boolean currentIsOnShip; // NEW: stores ship status from server
+    private long currentShipId; // NEW: stores ship ID from server
 
     // Client-side constructor
     public ShipItemTransportMenu(int containerId, Inventory inv, FriendlyByteBuf extraData) {
-        this(containerId, inv, inv.player.level().getBlockEntity(extraData.readBlockPos()), extraData.readBoolean(), extraData.readInt(), extraData.readInt());
+        this(containerId, inv,
+                inv.player.level().getBlockEntity(extraData.readBlockPos()),
+                extraData.readBoolean(),  // mode
+                extraData.readInt(),      // block count
+                extraData.readInt(),      // chest count
+                extraData.readBoolean(),  // NEW: isOnShip
+                extraData.readLong()      // NEW: shipId
+        );
     }
 
     // Server-side constructor with mode, block count, and chest count
-    public ShipItemTransportMenu(int containerId, Inventory inv, BlockEntity blockEntity, boolean currentMode, int currentBlockCount, int currentChestCount) {
+    public ShipItemTransportMenu(int containerId, Inventory inv, BlockEntity blockEntity,
+                                 boolean currentMode, int currentBlockCount, int currentChestCount,
+                                 boolean currentIsOnShip, long currentShipId) {
         super(ModMenuTypes.SHIP_ITEM_TRANSPORTER_MENU.get(), containerId);
 
         if (blockEntity instanceof ShipItemTransportBlockEntity) {
@@ -32,11 +43,11 @@ public class ShipItemTransportMenu extends AbstractContainerMenu {
         }
 
         this.levelAccess = ContainerLevelAccess.create(inv.player.level(), blockEntity != null ? blockEntity.getBlockPos() : BlockPos.ZERO);
-        this.currentMode = currentMode; // Store the mode from server
-        this.currentBlockCount = currentBlockCount; // Store the block count from server
-        this.currentChestCount = currentChestCount; // Store the chest count from server
-
-        // No inventory slots - we just want information display
+        this.currentMode = currentMode;
+        this.currentBlockCount = currentBlockCount;
+        this.currentChestCount = currentChestCount;
+        this.currentIsOnShip = currentIsOnShip; // NEW
+        this.currentShipId = currentShipId;     // NEW
     }
 
     @Override
@@ -68,6 +79,23 @@ public class ShipItemTransportMenu extends AbstractContainerMenu {
         return currentMode; // Return the stored mode from server
     }
 
+    // UPDATED: Get ship connection info for GUI - now uses synchronized data
+    public String getShipConnectionInfo() {
+        if (currentIsOnShip && currentShipId != -1) {
+            return "Ship " + currentShipId;
+        }
+        return "Ground";
+    }
+
+    // NEW: Get raw ship data
+    public boolean isOnShip() {
+        return currentIsOnShip;
+    }
+
+    public long getShipId() {
+        return currentShipId;
+    }
+
     public void setCurrentMode(boolean mode) {
         this.currentMode = mode;
     }
@@ -78,6 +106,12 @@ public class ShipItemTransportMenu extends AbstractContainerMenu {
 
     public void setCurrentChestCount(int chestCount) {
         this.currentChestCount = chestCount;
+    }
+
+    // NEW: Set ship info from sync packet
+    public void setShipInfo(boolean isOnShip, long shipId) {
+        this.currentIsOnShip = isOnShip;
+        this.currentShipId = shipId;
     }
 
     public void toggleMode() {

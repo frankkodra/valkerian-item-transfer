@@ -18,6 +18,8 @@ public class ModMenuTypes {
                         boolean mode = data.readBoolean(); // READ THE MODE
                         int blockCount = data.readInt(); // READ THE BLOCK COUNT
                         int chestCount = data.readInt(); // READ THE CHEST COUNT
-                        return new ShipItemTransportMenu(containerId, inv, inv.player.level().getBlockEntity(pos), mode, blockCount, chestCount);
+                        boolean onShip = data.readBoolean();
+                        long multiblockId = data.readLong();
+                        return new ShipItemTransportMenu(containerId, inv, inv.player.level().getBlockEntity(pos), mode, blockCount, chestCount,onShip,multiblockId);
                     }));
 }

@@ -1,4 +1,3 @@
-// NetworkHandler.java
 package shipItemTransport.code;
 
 import net.minecraft.resources.ResourceLocation;
@@ -20,6 +19,7 @@ public class NetworkHandler {
         INSTANCE.registerMessage(id++, SyncModePacket.class, SyncModePacket::toBytes, SyncModePacket::new, SyncModePacket::handle);
         INSTANCE.registerMessage(id++, BlockCountSyncPacket.class, BlockCountSyncPacket::toBytes, BlockCountSyncPacket::new, BlockCountSyncPacket::handle);
         INSTANCE.registerMessage(id++, ChestCountSyncPacket.class, ChestCountSyncPacket::toBytes, ChestCountSyncPacket::new, ChestCountSyncPacket::handle);
+        INSTANCE.registerMessage(id++, ShipInfoSyncPacket.class, ShipInfoSyncPacket::toBytes, ShipInfoSyncPacket::new, ShipInfoSyncPacket::handle);
     }
 }
 

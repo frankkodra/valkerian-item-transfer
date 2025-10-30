@@ -54,14 +54,15 @@ public class ShipItemTransportBlock extends BaseEntityBlock {
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         Direction facing = context.getClickedFace();
         return this.defaultBlockState().setValue(FACING, facing);
+
     }
 
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
-
+        Logger.sendMessage("Block placed at " + pos + " - processing immediately 1", true);
         if (!level.isClientSide && level.isLoaded(pos)) {
-            Logger.sendMessage("Block placed at " + pos + " - processing immediately", false);
+            Logger.sendMessage("Block placed at " + pos + " - processing immediately 2", true);
             MultiblockManager manager = MultiblockManager.get(level);
             if (manager != null) {
                 manager.onBlockPlaced(pos);

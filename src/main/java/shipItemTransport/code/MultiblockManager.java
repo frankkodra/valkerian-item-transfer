@@ -10,6 +10,12 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraftforge.network.PacketDistributor;
+import org.joml.Vector3d;
+import org.valkyrienskies.core.api.ships.Ship;
+import org.valkyrienskies.core.apigame.world.ServerShipWorldCore;
+import org.valkyrienskies.core.apigame.world.ShipWorldCore;
+import org.valkyrienskies.mod.common.VSGameUtilsKt;
+import org.joml.primitives.AABBic;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -19,11 +25,11 @@ public class MultiblockManager extends SavedData {
     private final Map<BlockPos, String> blockToMultiblock = new HashMap<>();
     private final Map<String, Boolean> multiblockModes = new HashMap<>(); // true = import, false = export
 
-    // Chest tracking - UPDATED: Support for multiple multiblocks per chest group
-    private final Map<String, Set<BlockPos>> multiblockChests = new HashMap<>(); // Multiblock ID -> Set of primary chest positions
-    private final Map<BlockPos, Set<String>> chestToMultiblocks = new HashMap<>(); // Primary chest -> Set of multiblock IDs (ONE-TO-MANY)
-    private final Map<BlockPos, Set<BlockPos>> chestGroups = new HashMap<>(); // Primary chest -> all chest positions in group
-    private final Map<BlockPos, BlockPos> chestToPrimary = new HashMap<>(); // Any chest -> primary chest
+    // Chest tracking
+    private final Map<String, Set<BlockPos>> multiblockChests = new HashMap<>();
+    private final Map<BlockPos, Set<String>> chestToMultiblocks = new HashMap<>();
+    private final Map<BlockPos, Set<BlockPos>> chestGroups = new HashMap<>();
+    private final Map<BlockPos, BlockPos> chestToPrimary = new HashMap<>();
 
     private final Level level;
 
@@ -39,6 +45,7 @@ public class MultiblockManager extends SavedData {
                 "ship_item_transport_multiblocks"
         );
     }
+
     public void validateAllChestConnections() {
         if (level.isClientSide) return;
 
@@ -48,6 +55,7 @@ public class MultiblockManager extends SavedData {
             validateChestConnectionsAfterBlockRemoval(multiblockId);
         }
     }
+
     public static MultiblockManager load(CompoundTag tag, Level level) {
         if (level.isClientSide) return null;
 
@@ -59,6 +67,8 @@ public class MultiblockManager extends SavedData {
             CompoundTag multiblockTag = multiblockList.getCompound(i);
             String id = multiblockTag.getString("Id");
             boolean importMode = multiblockTag.getBoolean("ImportMode");
+            boolean isOnShip = multiblockTag.getBoolean("IsOnShip");
+            Long shipId = multiblockTag.contains("ShipId") ? multiblockTag.getLong("ShipId") : null;
 
             // 2. Load all block positions for this multiblock
             ListTag blocksList = multiblockTag.getList("Blocks", CompoundTag.TAG_COMPOUND);
@@ -71,12 +81,12 @@ public class MultiblockManager extends SavedData {
                         posTag.getInt("z")
                 );
                 blocks.add(pos);
-                manager.blockToMultiblock.put(pos, id); // Rebuild block->multiblock mapping
+                manager.blockToMultiblock.put(pos, id);
             }
 
-            manager.multiblocks.put(id, new MultiblockData(id, blocks));
+            manager.multiblocks.put(id, new MultiblockData(id, blocks, isOnShip, shipId));
             manager.multiblockModes.put(id, importMode);
-            manager.multiblockChests.put(id, new HashSet<>()); // Initialize empty chest set
+            manager.multiblockChests.put(id, new HashSet<>());
         }
 
         // 3. Load chest connections
@@ -127,8 +137,6 @@ public class MultiblockManager extends SavedData {
                             memberTag.getInt("z")
                     );
                     members.add(memberPos);
-
-                    // Rebuild chestToPrimary mapping
                     manager.chestToPrimary.put(memberPos, primaryPos);
                 }
 
@@ -154,6 +162,10 @@ public class MultiblockManager extends SavedData {
             CompoundTag multiblockTag = new CompoundTag();
             multiblockTag.putString("Id", data.id);
             multiblockTag.putBoolean("ImportMode", multiblockModes.getOrDefault(data.id, true));
+            multiblockTag.putBoolean("IsOnShip", data.isOnShip);
+            if (data.shipId != null) {
+                multiblockTag.putLong("ShipId", data.shipId);
+            }
 
             // 2. Save all block positions in this multiblock
             ListTag blocksList = new ListTag();
@@ -212,37 +224,93 @@ public class MultiblockManager extends SavedData {
         return tag;
     }
 
-    public String createMultiblock(Set<BlockPos> blocks) {
+    // Ship detection methods
+    private Ship findShipForBlock(BlockPos worldPos) {
         if (level.isClientSide) return null;
 
-        String id = UUID.randomUUID().toString();
-        multiblocks.put(id, new MultiblockData(id, new HashSet<>(blocks)));
-        multiblockModes.put(id, true); // Default to import mode
-        multiblockChests.put(id, new HashSet<>()); // Initialize chest set
+        ShipWorldCore shipWorld = VSGameUtilsKt.getShipObjectWorld(level);
+        if (shipWorld == null) return null;
 
-        for (BlockPos pos : blocks) {
-            blockToMultiblock.put(pos, id);
+        for (Ship ship : shipWorld.getLoadedShips()) {
+            AABBic shipAABB = ship.getShipAABB();
+            if (shipAABB == null) continue;
+
+            // ShipAABB is in world coordinates - check if block is inside
+            if (worldPos.getX() >= shipAABB.minX() && worldPos.getX() <= shipAABB.maxX() &&
+                    worldPos.getY() >= shipAABB.minY() && worldPos.getY() <= shipAABB.maxY() &&
+                    worldPos.getZ() >= shipAABB.minZ() && worldPos.getZ() <= shipAABB.maxZ()) {
+                return ship;
+            }
+        }
+        return null;
+    }
+
+    private boolean isBlockOnShip(BlockPos worldPos) {
+        return findShipForBlock(worldPos) != null;
+    }
+
+    private Long getShipIdForBlock(BlockPos worldPos) {
+        Ship ship = findShipForBlock(worldPos);
+        return ship != null ? ship.getId() : null;
+    }
+
+    // Public methods to access ship status
+    public boolean isMultiblockOnShip(String multiblockId) {
+        if (level.isClientSide) return false;
+        MultiblockData data = multiblocks.get(multiblockId);
+        return data != null && data.isOnShip;
+    }
+
+    public Long getMultiblockShipId(String multiblockId) {
+        if (level.isClientSide) return null;
+        MultiblockData data = multiblocks.get(multiblockId);
+        return data.shipId!=null ? data.shipId : -1;
+    }
+
+    public String getMultiblockShipInfo(String multiblockId) {
+        if (level.isClientSide) return "Ground";
+
+        MultiblockData data = multiblocks.get(multiblockId);
+        if (data == null || !data.isOnShip || data.shipId == null) {
+            return "Ground";
         }
 
-        setDirty();
-        Logger.sendMessage("Created new multiblock " + id + " with " + blocks.size() + " blocks", false);
-        return id;
+        // Try to get ship name or just return ship ID
+        ShipWorldCore shipWorld = VSGameUtilsKt.getShipObjectWorld(level);
+        if (shipWorld != null) {
+            Ship ship = shipWorld.getAllShips().getById(data.shipId);
+            if (ship != null) {
+                return "Ship " + data.shipId;
+            }
+        }
+
+        return "Ship " + data.shipId;
+    }
+
+    // Multiblock creation methods
+    public String createMultiblock(Set<BlockPos> blocks) {
+        return createMultiblock(blocks, true, false, null);
     }
 
     public String createMultiblock(Set<BlockPos> blocks, boolean importMode) {
+        return createMultiblock(blocks, importMode, false, null);
+    }
+
+    private String createMultiblock(Set<BlockPos> blocks, boolean importMode, boolean isOnShip, Long shipId) {
         if (level.isClientSide) return null;
 
         String id = UUID.randomUUID().toString();
-        multiblocks.put(id, new MultiblockData(id, new HashSet<>(blocks)));
-        multiblockModes.put(id, importMode); // Use specified mode
-        multiblockChests.put(id, new HashSet<>()); // Initialize chest set
+        multiblocks.put(id, new MultiblockData(id, new HashSet<>(blocks), isOnShip, shipId));
+        multiblockModes.put(id, importMode);
+        multiblockChests.put(id, new HashSet<>());
 
         for (BlockPos pos : blocks) {
             blockToMultiblock.put(pos, id);
         }
 
         setDirty();
-        Logger.sendMessage("Created new multiblock " + id + " with " + blocks.size() + " blocks (mode: " + (importMode ? "import" : "export") + ")", false);
+        Logger.sendMessage("Created new multiblock " + id + " with " + blocks.size() +
+                " blocks (on ship: " + isOnShip + ", shipId: " + shipId + ")", false);
         return id;
     }
 
@@ -276,6 +344,14 @@ public class MultiblockManager extends SavedData {
     }
 
     public void updateMultiblock(String id, Set<BlockPos> blocks) {
+        // For backward compatibility, maintain existing ship status
+        MultiblockData oldData = multiblocks.get(id);
+        if (oldData != null) {
+            updateMultiblock(id, blocks, oldData.isOnShip, oldData.shipId);
+        }
+    }
+
+    private void updateMultiblock(String id, Set<BlockPos> blocks, boolean isOnShip, Long shipId) {
         if (level.isClientSide) return;
 
         MultiblockData oldData = multiblocks.get(id);
@@ -284,20 +360,21 @@ public class MultiblockManager extends SavedData {
             for (BlockPos pos : oldData.blocks) {
                 blockToMultiblock.remove(pos);
             }
-
-            // Add new block mappings
-            for (BlockPos pos : blocks) {
-                blockToMultiblock.put(pos, id);
-            }
-
-            multiblocks.put(id, new MultiblockData(id, new HashSet<>(blocks)));
-            setDirty();
-
-            // SEND BLOCK COUNT SYNC TO ALL PLAYERS VIEWING THIS MULTIBLOCK
-            sendBlockCountSync(id, blocks.size());
-
-            Logger.sendMessage("Updated multiblock " + id + " with " + blocks.size() + " blocks", false);
         }
+
+        // Add new block mappings
+        for (BlockPos pos : blocks) {
+            blockToMultiblock.put(pos, id);
+        }
+
+        multiblocks.put(id, new MultiblockData(id, new HashSet<>(blocks), isOnShip, shipId));
+        setDirty();
+
+        // SEND BLOCK COUNT SYNC TO ALL PLAYERS VIEWING THIS MULTIBLOCK
+        sendBlockCountSync(id, blocks.size());
+
+        Logger.sendMessage("Updated multiblock " + id + " with " + blocks.size() +
+                " blocks (on ship: " + isOnShip + ")", false);
     }
 
     public String getMultiblockForBlock(BlockPos pos) {
@@ -319,7 +396,7 @@ public class MultiblockManager extends SavedData {
     }
 
     public boolean getMultiblockMode(String multiblockId) {
-        return multiblockModes.getOrDefault(multiblockId, true); // Default to import mode
+        return multiblockModes.getOrDefault(multiblockId, true);
     }
 
     public void toggleMultiblockMode(String multiblockId) {
@@ -511,7 +588,6 @@ public class MultiblockManager extends SavedData {
     // Consistent primary chest determination
     private BlockPos determineConsistentPrimaryPosition(Set<BlockPos> chestGroup) {
         // Always use the chest with the smallest coordinates to ensure consistency
-        // This prevents the "left vs right" issue
         return chestGroup.stream()
                 .min((pos1, pos2) -> {
                     // Compare by X, then Z, then Y
@@ -624,41 +700,6 @@ public class MultiblockManager extends SavedData {
         Logger.sendMessage("Updated primary chest from " + oldPrimary + " to " + newPrimary + " for group: " + chestGroup, false);
     }
 
-    private void updatePrimaryChestPosition(BlockPos oldPrimary, BlockPos newPrimary, String multiblockId) {
-        Set<BlockPos> chestGroup = chestGroups.get(oldPrimary);
-        if (chestGroup == null) return;
-
-        // Update multiblock chest tracking for THIS multiblock
-        multiblockChests.get(multiblockId).remove(oldPrimary);
-        multiblockChests.get(multiblockId).add(newPrimary);
-
-        // Update chest-to-multiblocks mapping
-        Set<String> multiblockIds = chestToMultiblocks.get(oldPrimary);
-        if (multiblockIds != null) {
-            chestToMultiblocks.remove(oldPrimary);
-            chestToMultiblocks.put(newPrimary, multiblockIds);
-        }
-
-        // Update chest group tracking
-        chestGroups.remove(oldPrimary);
-        registerChestGroup(newPrimary, chestGroup);
-
-        setDirty();
-    }
-
-    // UPDATED: Improved connection checking for multiple multiblocks
-    private boolean isChestConnectedToMultiblock(BlockPos chestPos, String multiblockId) {
-        Set<BlockPos> multiblockBlocks = getMultiblockBlocks(multiblockId);
-
-        for (BlockPos blockPos : multiblockBlocks) {
-            for (Direction dir : ChestHelper.getValidConnectionDirections(level, blockPos)) {
-                if (blockPos.relative(dir).equals(chestPos)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
 
     private void validateChestConnectionsAfterBlockRemoval(String multiblockId) {
         Set<BlockPos> chestsToCheck = new HashSet<>(multiblockChests.get(multiblockId));
@@ -696,6 +737,197 @@ public class MultiblockManager extends SavedData {
                 if (ChestHelper.isChest(level, checkPos)) {
                     handleChestNearMultiblock(checkPos, blockPos);
                 }
+            }
+        }
+    }
+
+    // Block placement and removal
+    public void onBlockPlaced(BlockPos newPos) {
+        if (level.isClientSide) return;
+
+        Logger.sendMessage("Processing block placement at " + newPos, false);
+
+        // First, validate that this block isn't already in a multiblock
+        if (blockToMultiblock.containsKey(newPos)) {
+            Logger.sendMessage("WARNING: Block at " + newPos + " already in multiblock " + blockToMultiblock.get(newPos), false);
+            return;
+        }
+
+        // Find all adjacent multiblocks that can connect
+        Set<String> adjacentMultiblocks = findAdjacentMultiblocks(newPos);
+
+        if (adjacentMultiblocks.isEmpty()) {
+            // No valid neighbors - create single-block multiblock
+            createSingleBlockMultiblock(newPos);
+        } else if (adjacentMultiblocks.size() == 1) {
+            // One valid neighbor - join that multiblock
+            String targetId = adjacentMultiblocks.iterator().next();
+            joinMultiblock(newPos, targetId);
+        } else {
+            // Multiple adjacent multiblocks - merge them all
+            mergeMultiblocks(newPos, adjacentMultiblocks);
+        }
+    }
+
+    private void createSingleBlockMultiblock(BlockPos pos) {
+        Set<BlockPos> singleBlock = Collections.singleton(pos);
+
+        // Determine ship status for this new single block
+        boolean isOnShip = isBlockOnShip(pos);
+        Long shipId = isOnShip ? getShipIdForBlock(pos) : null;
+
+        String newId = createMultiblock(singleBlock, true, isOnShip, shipId);
+        updateBlockEntity(pos, newId, singleBlock);
+        Logger.sendMessage("Created single-block multiblock " + newId + " at " + pos +
+                " (on ship: " + isOnShip + ")", false);
+    }
+
+    private void joinMultiblock(BlockPos newPos, String targetId) {
+        MultiblockData targetData = multiblocks.get(targetId);
+        if (targetData == null) return;
+
+        Set<BlockPos> blocks = new HashSet<>(targetData.blocks);
+        blocks.add(newPos);
+
+        // Inherit the existing multiblock's ship status
+        updateMultiblock(targetId, blocks, targetData.isOnShip, targetData.shipId);
+        updateBlockEntity(newPos, targetId, blocks);
+        Logger.sendMessage("Added block at " + newPos + " to multiblock " + targetId +
+                " (inherited ship status: " + targetData.isOnShip + ")", false);
+    }
+
+    private void mergeMultiblocks(BlockPos newPos, Set<String> multiblockIds) {
+        // Verify all multiblocks have the same facing direction
+        Direction requiredFacing = level.getBlockState(newPos).getValue(ShipItemTransportBlock.FACING);
+
+        for (String id : multiblockIds) {
+            Set<BlockPos> blocks = getMultiblockBlocks(id);
+            if (!blocks.isEmpty()) {
+                BlockPos samplePos = blocks.iterator().next();
+                Direction sampleFacing = level.getBlockState(samplePos).getValue(ShipItemTransportBlock.FACING);
+                if (sampleFacing != requiredFacing) {
+                    Logger.sendMessage("Cannot merge multiblocks with different facing directions", false);
+                    return;
+                }
+            }
+        }
+
+        // Find the main multiblock to merge into
+        String mainId = multiblockIds.iterator().next();
+        MultiblockData mainData = multiblocks.get(mainId);
+
+        Set<BlockPos> allMergedBlocks = new HashSet<>(getMultiblockBlocks(mainId));
+        allMergedBlocks.add(newPos);
+
+        // Determine merged ship status: if ANY multiblock is on ship, result is on ship
+        boolean mergedIsOnShip = mainData.isOnShip;
+        Long mergedShipId = mainData.shipId;
+
+        for (String id : multiblockIds) {
+            MultiblockData data = multiblocks.get(id);
+            if (data != null && data.isOnShip) {
+                mergedIsOnShip = true;
+                mergedShipId = data.shipId; // Use the first shipId we find
+                break;
+            }
+        }
+
+        // COLLECT ALL PRIMARY CHEST POSITIONS
+        Set<BlockPos> allPrimaryChests = new HashSet<>();
+        for (String id : multiblockIds) {
+            Set<BlockPos> chests = multiblockChests.get(id);
+            if (chests != null) {
+                allPrimaryChests.addAll(chests);
+            }
+        }
+
+        // Add all blocks from other multiblocks
+        for (String id : multiblockIds) {
+            if (!id.equals(mainId)) {
+                allMergedBlocks.addAll(getMultiblockBlocks(id));
+                removeMultiblock(id);
+            }
+        }
+
+        // Update the main multiblock with ALL merged blocks and ship status
+        updateMultiblock(mainId, allMergedBlocks, mergedIsOnShip, mergedShipId);
+
+        // ADD ALL UNIQUE PRIMARY CHESTS TO THE MERGED MULTIBLOCK
+        for (BlockPos primaryChestPos : allPrimaryChests) {
+            if (!multiblockChests.get(mainId).contains(primaryChestPos)) {
+                multiblockChests.get(mainId).add(primaryChestPos);
+                chestToMultiblocks.computeIfAbsent(primaryChestPos, k -> new HashSet<>()).add(mainId);
+            }
+        }
+
+        setDirty();
+
+        // Update ALL block entities in the merged multiblock
+        for (BlockPos pos : allMergedBlocks) {
+            updateBlockEntity(pos, mainId, allMergedBlocks);
+        }
+
+        // SEND GUI UPDATES
+        sendBlockCountSyncToAllMergedViewers(multiblockIds, mainId, allMergedBlocks.size());
+
+        Logger.sendMessage("Merged " + multiblockIds.size() + " multiblocks into " + mainId +
+                " with " + allMergedBlocks.size() + " blocks" +
+                " (on ship: " + mergedIsOnShip + ", shipId: " + mergedShipId + ")", false);
+    }
+
+    public void onBlockRemoved(BlockPos removedPos) {
+        if (level.isClientSide) return;
+
+        String multiblockId = blockToMultiblock.get(removedPos);
+        if (multiblockId == null) return;
+
+        Logger.sendMessage("Processing block removal at " + removedPos + " from multiblock " + multiblockId, false);
+
+        // Remove the block from tracking
+        blockToMultiblock.remove(removedPos);
+
+        // Get remaining blocks
+        Set<BlockPos> remainingBlocks = getMultiblockBlocks(multiblockId);
+        remainingBlocks.remove(removedPos);
+
+        if (remainingBlocks.isEmpty()) {
+            // No blocks left - remove the multiblock
+            removeMultiblock(multiblockId);
+        } else {
+            // Check if the multiblock is still connected
+            List<Set<BlockPos>> connectedComponents = findConnectedComponents(remainingBlocks);
+
+            if (connectedComponents.size() == 1) {
+                // Still connected - just update the multiblock (inherit ship status)
+                MultiblockData oldData = multiblocks.get(multiblockId);
+                updateMultiblock(multiblockId, remainingBlocks, oldData.isOnShip, oldData.shipId);
+                validateChestConnectionsAfterBlockRemoval(multiblockId);
+            } else {
+                // Split into multiple multiblocks - PRESERVE MODE AND SHIP STATUS
+                MultiblockData originalData = multiblocks.get(multiblockId);
+                boolean originalMode = getMultiblockMode(multiblockId);
+                boolean originalIsOnShip = originalData.isOnShip;
+                Long originalShipId = originalData.shipId;
+
+                removeMultiblock(multiblockId);
+
+                for (Set<BlockPos> component : connectedComponents) {
+                    if (!component.isEmpty()) {
+                        // Create new multiblock with ORIGINAL mode and ship status
+                        String newMultiblockId = createMultiblock(component, originalMode, originalIsOnShip, originalShipId);
+
+                        // Send GUI updates for all blocks in this new component
+                        for (BlockPos pos : component) {
+                            updateBlockEntity(pos, newMultiblockId, component);
+                            sendBlockCountSyncToViewers(pos, component.size());
+                        }
+
+                        // Scan for chests connected to the new multiblock
+                        scanForChestsInMultiblock(newMultiblockId, component);
+                    }
+                }
+                Logger.sendMessage("Split multiblock into " + connectedComponents.size() +
+                        " components (preserved ship status: " + originalIsOnShip + ")", false);
             }
         }
     }
@@ -758,85 +990,6 @@ public class MultiblockManager extends SavedData {
             default:
                 return false;
         }
-    }
-
-    private void createSingleBlockMultiblock(BlockPos pos) {
-        Set<BlockPos> singleBlock = Collections.singleton(pos);
-        String newId = createMultiblock(singleBlock);
-        updateBlockEntity(pos, newId, singleBlock);
-        Logger.sendMessage("Created single-block multiblock " + newId + " at " + pos, false);
-    }
-
-    private void joinMultiblock(BlockPos newPos, String targetId) {
-        Set<BlockPos> blocks = getMultiblockBlocks(targetId);
-        blocks.add(newPos);
-        updateMultiblock(targetId, blocks); // This will now automatically send sync
-        updateBlockEntity(newPos, targetId, blocks);
-        Logger.sendMessage("Added block at " + newPos + " to multiblock " + targetId, false);
-    }
-
-    // UPDATED: Simple chest handling for merging
-    private void mergeMultiblocks(BlockPos newPos, Set<String> multiblockIds) {
-        // Verify all multiblocks have the same facing direction
-        Direction requiredFacing = level.getBlockState(newPos).getValue(ShipItemTransportBlock.FACING);
-
-        for (String id : multiblockIds) {
-            Set<BlockPos> blocks = getMultiblockBlocks(id);
-            if (!blocks.isEmpty()) {
-                BlockPos samplePos = blocks.iterator().next();
-                Direction sampleFacing = level.getBlockState(samplePos).getValue(ShipItemTransportBlock.FACING);
-                if (sampleFacing != requiredFacing) {
-                    Logger.sendMessage("Cannot merge multiblocks with different facing directions", false);
-                    return;
-                }
-            }
-        }
-
-        // Find the largest multiblock to merge into (or just pick the first)
-        String mainId = multiblockIds.iterator().next();
-        Set<BlockPos> allMergedBlocks = new HashSet<>(getMultiblockBlocks(mainId));
-        allMergedBlocks.add(newPos);
-
-        // COLLECT ALL PRIMARY CHEST POSITIONS (HashSet automatically handles duplicates)
-        Set<BlockPos> allPrimaryChests = new HashSet<>();
-        for (String id : multiblockIds) {
-            Set<BlockPos> chests = multiblockChests.get(id);
-            if (chests != null) {
-                allPrimaryChests.addAll(chests); // These are already primary positions
-            }
-        }
-
-        // Add all blocks from other multiblocks
-        for (String id : multiblockIds) {
-            if (!id.equals(mainId)) {
-                allMergedBlocks.addAll(getMultiblockBlocks(id));
-                removeMultiblock(id); // Use normal removal
-            }
-        }
-
-        // Update the main multiblock with ALL merged blocks
-        updateMultiblock(mainId, allMergedBlocks);
-
-        // ADD ALL UNIQUE PRIMARY CHESTS TO THE MERGED MULTIBLOCK
-        for (BlockPos primaryChestPos : allPrimaryChests) {
-            if (!multiblockChests.get(mainId).contains(primaryChestPos)) {
-                multiblockChests.get(mainId).add(primaryChestPos);
-                chestToMultiblocks.computeIfAbsent(primaryChestPos, k -> new HashSet<>()).add(mainId);
-            }
-        }
-
-        setDirty();
-
-        // CRITICAL FIX: Update ALL block entities in the merged multiblock, not just the new position
-        for (BlockPos pos : allMergedBlocks) {
-            updateBlockEntity(pos, mainId, allMergedBlocks);
-        }
-
-        // SEND GUI UPDATES TO ALL PLAYERS VIEWING ANY OF THE MERGED MULTIBLOCKS
-        sendBlockCountSyncToAllMergedViewers(multiblockIds, mainId, allMergedBlocks.size());
-
-        Logger.sendMessage("Merged " + multiblockIds.size() + " multiblocks into " + mainId +
-                " with " + allMergedBlocks.size() + " blocks and " + allPrimaryChests.size() + " chests", false);
     }
 
     private List<Set<BlockPos>> findConnectedComponents(Set<BlockPos> blocks) {
@@ -972,92 +1125,52 @@ public class MultiblockManager extends SavedData {
             }
         }
     }
-    public void onBlockRemoved(BlockPos removedPos) {
-        if (level.isClientSide) return;
+    // In MultiblockManager.java - add these sync methods
 
-        String multiblockId = blockToMultiblock.get(removedPos);
-        if (multiblockId == null) return;
+    // NEW: Send ship info sync to viewers of a multiblock
+    private void sendShipInfoSync(String multiblockId, boolean isOnShip, long shipId) {
+        if (level instanceof ServerLevel serverLevel) {
+            ShipInfoSyncPacket syncPacket = new ShipInfoSyncPacket(isOnShip, shipId);
+            for (ServerPlayer serverPlayer : serverLevel.players()) {
+                // Check if player has a menu open for this multiblock
+                if (serverPlayer.containerMenu instanceof ShipItemTransportMenu menu &&
+                        menu.getBlockEntity() != null) {
 
-        Logger.sendMessage("Processing block removal at " + removedPos + " from multiblock " + multiblockId, false);
+                    String viewedMultiblockId = menu.getBlockEntity().getMultiblockId();
 
-        // Remove the block from tracking
-        blockToMultiblock.remove(removedPos);
-
-        // Get remaining blocks
-        Set<BlockPos> remainingBlocks = getMultiblockBlocks(multiblockId);
-        remainingBlocks.remove(removedPos);
-
-        if (remainingBlocks.isEmpty()) {
-            // No blocks left - remove the multiblock
-            removeMultiblock(multiblockId);
-        } else {
-            // Check if the multiblock is still connected (respecting direction and plane constraints)
-            List<Set<BlockPos>> connectedComponents = findConnectedComponents(remainingBlocks);
-
-            if (connectedComponents.size() == 1) {
-                // Still connected - just update the multiblock
-                updateMultiblock(multiblockId, remainingBlocks);
-
-                // Check chest connections after block removal
-                validateChestConnectionsAfterBlockRemoval(multiblockId);
-            } else {
-                // Split into multiple multiblocks - PRESERVE THE MODE SETTING
-                boolean originalMode = getMultiblockMode(multiblockId);
-                removeMultiblock(multiblockId);
-
-                for (Set<BlockPos> component : connectedComponents) {
-                    if (!component.isEmpty()) {
-                        // Create new multiblock with the ORIGINAL mode setting
-                        String newMultiblockId = createMultiblock(component, originalMode);
-
-                        // Send GUI updates for all blocks in this new component
-                        for (BlockPos pos : component) {
-                            updateBlockEntity(pos, newMultiblockId, component);
-                            sendBlockCountSyncToViewers(pos, component.size());
-                        }
-
-                        // Scan for chests connected to the new multiblock
-                        scanForChestsInMultiblock(newMultiblockId, component);
+                    // Send if viewing the same multiblock
+                    if (multiblockId.equals(viewedMultiblockId)) {
+                        NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer), syncPacket);
                     }
                 }
-                Logger.sendMessage("Split multiblock into " + connectedComponents.size() + " components (preserved mode: " + (originalMode ? "import" : "export") + ")", false);
             }
         }
     }
-    public void onBlockPlaced(BlockPos newPos) {
+
+    // NEW: Send initial ship info when GUI opens
+    public void sendInitialShipInfoSync(ServerPlayer player, String multiblockId) {
         if (level.isClientSide) return;
 
-        Logger.sendMessage("Processing block placement at " + newPos, false);
-
-        // First, validate that this block isn't already in a multiblock (shouldn't happen, but safety check)
-        if (blockToMultiblock.containsKey(newPos)) {
-            Logger.sendMessage("WARNING: Block at " + newPos + " already in multiblock " + blockToMultiblock.get(newPos), false);
-            return;
-        }
-
-        // Find all adjacent multiblocks that can connect (same direction & plane)
-        Set<String> adjacentMultiblocks = findAdjacentMultiblocks(newPos);
-
-        if (adjacentMultiblocks.isEmpty()) {
-            // No valid neighbors - create single-block multiblock
-            createSingleBlockMultiblock(newPos);
-        } else if (adjacentMultiblocks.size() == 1) {
-            // One valid neighbor - join that multiblock
-            String targetId = adjacentMultiblocks.iterator().next();
-            joinMultiblock(newPos, targetId);
-        } else {
-            // Multiple adjacent multiblocks - merge them all if they're compatible
-            mergeMultiblocks(newPos, adjacentMultiblocks);
+        MultiblockData data = multiblocks.get(multiblockId);
+        if (data != null) {
+            long shipId = data.shipId != null ? data.shipId : -1;
+            ShipInfoSyncPacket syncPacket = new ShipInfoSyncPacket(data.isOnShip, shipId);
+            NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> player), syncPacket);
         }
     }
+
     // Data class for persistent multiblock storage
     private static class MultiblockData {
         public final String id;
         public final Set<BlockPos> blocks;
+        public final boolean isOnShip;
+        public final Long shipId; // null if on ground
 
-        public MultiblockData(String id, Set<BlockPos> blocks) {
+        public MultiblockData(String id, Set<BlockPos> blocks, boolean isOnShip, Long shipId) {
             this.id = id;
             this.blocks = blocks;
+            this.isOnShip = isOnShip;
+            this.shipId = shipId;
         }
     }
 }

@@ -3,6 +3,7 @@ package shipItemTransport.code;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -27,9 +28,12 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
     private String multiblockId = null;
     private Set<BlockPos> multiblockMembers = new HashSet<>();
 
+
     public ShipItemTransportBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.SHIP_ITEM_TRANSPORTER.get(), pos, state);
     }
+
+
 
     public void setMultiblock(String id, Set<BlockPos> members) {
         this.multiblockId = id;
@@ -91,7 +95,25 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
                 return manager.getMultiblockChestCount(multiblockId);
             }
         }
+
         return 0; // No chests if no multiblock or invalid state
+    }
+
+
+    // NEW: Get ship connection info
+    public boolean isOnShip() {
+        if (level == null || level.isClientSide || multiblockId == null) return false;
+
+        MultiblockManager manager = MultiblockManager.get(level);
+        return manager != null && manager.isMultiblockOnShip(multiblockId);
+    }
+
+    // NEW: Get ship connection info for GUI display
+    public String getShipConnectionInfo() {
+        if (level == null || level.isClientSide || multiblockId == null) return "Ground";
+
+        MultiblockManager manager = MultiblockManager.get(level);
+        return manager != null ? manager.getMultiblockShipInfo(multiblockId) : "Ground";
     }
 
     public void toggleMode() {
@@ -150,8 +172,9 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
                 multiblockMembers.add(pos);
             }
 
-            Logger.sendMessage("Loaded block at " + getBlockPos() + " belonging to multiblock " + multiblockId, false);
+            Logger.sendMessage("Loaded block at " + getBlockPos() + " belonging to multiblock " + multiblockId, true);
         }
+
     }
 
     @Override
@@ -198,7 +221,7 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         // This runs on SERVER side only
         // Just return a menu instance - Forge will handle the network sync
-        return new ShipItemTransportMenu(containerId, playerInventory, this, isImportMode(), getMultiblockSize(), getChestCount());
+        return new ShipItemTransportMenu(containerId, playerInventory, this, isImportMode(), getMultiblockSize(), getChestCount(),isOnShip(),MultiblockManager.get(level).getMultiblockShipId(multiblockId));
     }
 
     // ADD THIS METHOD - Forge calls this automatically to write data to client
@@ -213,9 +236,13 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
     public void openMenu(ServerPlayer player) {
         NetworkHooks.openScreen(player, this, buf -> {
             buf.writeBlockPos(getBlockPos());
-            buf.writeBoolean(isImportMode()); // Write the mode to the buffer
-            buf.writeInt(getMultiblockSize()); // Write the block count to the buffer
-            buf.writeInt(getChestCount()); // Write the chest count to the buffer
+            buf.writeBoolean(isImportMode());
+            buf.writeInt(getMultiblockSize());
+            buf.writeInt(getChestCount());
+            // NEW: Add ship info to the buffer
+            buf.writeBoolean(isOnShip());
+            long shipId = MultiblockManager.get(level).getMultiblockShipId(multiblockId);
+            buf.writeLong(shipId );
         });
     }
 }
