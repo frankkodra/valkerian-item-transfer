@@ -1,0 +1,16 @@
+{
+  "variants": {
+    "facing=up,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter" },
+    "facing=down,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 180 },
+    "facing=north,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90 },
+    "facing=south,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 180 },
+    "facing=west,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 270 },
+    "facing=east,formed=false": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 90 },
+    "facing=up,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter" },
+    "facing=down,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 180 },
+    "facing=north,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90 },
+    "facing=south,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 180 },
+    "facing=west,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 270 },
+    "facing=east,formed=true": { "model": "ship_item_transport_mod:block/ship_item_transporter", "x": 90, "y": 90 }
+  }
+}

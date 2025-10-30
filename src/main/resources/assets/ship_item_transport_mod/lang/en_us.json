@@ -1,0 +1,7 @@
+{
+  "block.ship_item_transport_mod.ship_item_transporter": "Ship Item Transporter",
+  "itemGroup.ship_item_transport_mod": "Ship Transport",
+  "container.ship_item_transport_mod.ship_item_transporter": "Ship Item Transporter",
+  "gui.ship_item_transport.import": "Import",
+  "gui.ship_item_transport.export": "Export"
+}
