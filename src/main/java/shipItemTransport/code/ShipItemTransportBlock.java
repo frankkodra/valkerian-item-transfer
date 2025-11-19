@@ -12,6 +12,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.Block;
@@ -24,31 +25,46 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraftforge.network.NetworkHooks;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 public class ShipItemTransportBlock extends BaseEntityBlock {
     public static final DirectionProperty FACING = BlockStateProperties.FACING;
     public static final BooleanProperty FORMED = BooleanProperty.create("formed");
 
+
     public ShipItemTransportBlock(Properties properties) {
         super(properties
-                .noOcclusion() // This allows blocks behind/under this one to render
+                .noOcclusion()
+                .strength(3.0f, 6.0f) // Hardness and resistance
+                .requiresCorrectToolForDrops() // Requires pickaxe
         );
-
         this.registerDefaultState(this.stateDefinition.any()
-                .setValue(FACING, Direction.UP)
+                   .setValue(FACING, Direction.UP)
                 .setValue(FORMED, false));
+    }
+
+    // Add these methods for tool requirements:
+    @Override
+    public boolean canHarvestBlock(BlockState state, BlockGetter level, BlockPos pos, Player player) {
+        return player.hasCorrectToolForDrops(state);
     }
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         builder.add(FACING, FORMED);
     }
-
+    @Override
+    public List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
+        // Drop the block item itself
+        return Collections.singletonList(new ItemStack(ShipItemTransportMod.SHIP_ITEM_TRANSPORTER_ITEM.get()));
+    }
     @Nullable
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {

@@ -14,8 +14,7 @@ public class Config {
 
     // Item transport settings
     public static int ITEM_TRANSFER_RATE = 4; // Items per tick
-    public static int TRANSFER_RANGE = 16; // Maximum distance for item transfer
-    public static boolean ENABLE_ITEM_TRANSPORT = true;
+
 
     private static final String CONFIG_FILE_NAME = "ship_item_transporter.toml";
     private static final String DEFAULT_CONFIG =
@@ -24,20 +23,15 @@ public class Config {
                     "sendLogsToAllPlayers=false\n\n" +
 
                     "# Whether to create log files in the logs/ directory\n" +
-                    "createLogFiles=True\n\n" +
+                    "createLogFiles=false\n\n" +
 
                     "# Whether to output logs to console (useful for debugging)\n" +
                     "consoleLogs=true\n\n" +
 
                     "# Item transport settings\n" +
                     "# How many items to transfer per tick (20 ticks = 1 second)\n" +
-                    "itemTransferRate=4\n\n" +
+                    "itemTransferRate=4\n\n" ;
 
-                    "# Maximum distance for item transfer between blocks in multiblock\n" +
-                    "transferRange=16\n\n" +
-
-                    "# Enable or disable item transport functionality\n" +
-                    "enableItemTransport=true\n";
 
     public static void load() {
         try {
@@ -107,12 +101,8 @@ public class Config {
                 case "itemTransferRate":
                     ITEM_TRANSFER_RATE = parseInt(value, 4);
                     break;
-                case "transferRange":
-                    TRANSFER_RANGE = parseInt(value, 16);
-                    break;
-                case "enableItemTransport":
-                    ENABLE_ITEM_TRANSPORT = parseBoolean(value, true);
-                    break;
+
+
                 default:
                     if (CONSOLE_LOGS) {
                         System.out.println("[Ship Item Transporter] Unknown config option: " + key);
@@ -152,8 +142,8 @@ public class Config {
             System.out.println("[Ship Item Transporter] - File logs: " + CREATE_LOG_FILES);
             System.out.println("[Ship Item Transporter] - Console logs: " + CONSOLE_LOGS);
             System.out.println("[Ship Item Transporter] - Item transfer rate: " + ITEM_TRANSFER_RATE);
-            System.out.println("[Ship Item Transporter] - Transfer range: " + TRANSFER_RANGE);
-            System.out.println("[Ship Item Transporter] - Item transport enabled: " + ENABLE_ITEM_TRANSPORT);
+
+
         }
     }
 
@@ -162,8 +152,7 @@ public class Config {
         CREATE_LOG_FILES = false;
         CONSOLE_LOGS = true;
         ITEM_TRANSFER_RATE = 4;
-        TRANSFER_RANGE = 16;
-        ENABLE_ITEM_TRANSPORT = true;
+
     }
 
     public static void reload() {
