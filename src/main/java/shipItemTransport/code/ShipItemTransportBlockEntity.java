@@ -26,7 +26,7 @@ import java.util.Set;
 
 public class ShipItemTransportBlockEntity extends BlockEntity implements MenuProvider {
     private String multiblockId = null;
-    private Set<BlockPos> multiblockMembers = new HashSet<>();
+
     boolean needsRegistration = true;
     private String oldMultiblockId = null;
     private boolean importMode = true;
@@ -34,6 +34,7 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
     public ShipItemTransportBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.SHIP_ITEM_TRANSPORTER.get(), pos, state);
     }
+
     public boolean isImportMode() {
         // If part of a multiblock, get mode from manager. Otherwise use local mode.
         if (multiblockId != null && level != null && !level.isClientSide) {
@@ -51,7 +52,7 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
 
     public void setMultiblock(String id, Set<BlockPos> members) {
         this.multiblockId = id;
-        this.multiblockMembers = new HashSet<>(members);
+
         setChanged();
 
         // Notify client of changes
@@ -75,9 +76,7 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
         return multiblockId;
     }
 
-    public Set<BlockPos> getMultiblockMembers() {
-        return new HashSet<>(multiblockMembers);
-    }
+
 
 
 
@@ -146,15 +145,6 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
         // NEW: Save import mode
         tag.putBoolean("ImportMode", importMode);
 
-        ListTag membersList = new ListTag();
-        for (BlockPos pos : multiblockMembers) {
-            CompoundTag posTag = new CompoundTag();
-            posTag.putInt("x", pos.getX());
-            posTag.putInt("y", pos.getY());
-            posTag.putInt("z", pos.getZ());
-            membersList.add(posTag);
-        }
-        tag.put("MultiblockMembers", membersList);
     }
 
     // FIXED: Use the correct NBT method signatures
@@ -171,17 +161,7 @@ public class ShipItemTransportBlockEntity extends BlockEntity implements MenuPro
         if (tag.contains("MultiblockId")) {
             multiblockId = tag.getString("MultiblockId");
 
-            multiblockMembers.clear();
-            ListTag membersList = tag.getList("MultiblockMembers", Tag.TAG_COMPOUND);
-            for (int i = 0; i < membersList.size(); i++) {
-                CompoundTag posTag = membersList.getCompound(i);
-                BlockPos pos = new BlockPos(
-                        posTag.getInt("x"),
-                        posTag.getInt("y"),
-                        posTag.getInt("z")
-                );
-                multiblockMembers.add(pos);
-            }
+
 
             Logger.sendMessage("Loaded block at " + getBlockPos() + " belonging to multiblock " + multiblockId + " with mode: " + (importMode ? "IMPORT" : "EXPORT"), true);
         }

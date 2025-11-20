@@ -34,7 +34,7 @@ public class MultiblockManager {
     private final Map<BlockPos, Set<String>> chestToMultiblocks = new HashMap<>();
     private final Map<BlockPos, Set<BlockPos>> chestGroups = new HashMap<>();
     private final Map<BlockPos, BlockPos> chestToPrimary = new HashMap<>();
-    private static Map<Level, MultiblockManager> multiblockManagers = new HashMap<Level, MultiblockManager>();
+    private static Map<Level, MultiblockManager> multiblockManagers = new WeakHashMap<Level, MultiblockManager>();
     private final Level level;
 
     // Transfer system
@@ -435,11 +435,11 @@ public class MultiblockManager {
         if (data2.isOnShip && data2.shipId != null) {
             // Transform ship OBB to world coordinates
             obb2World = transformOBBToWorld(data2);
-            Logger.sendMessage("Transformed OBB1 to world: " + obb1World.toString(), true);
+            Logger.sendMessage("Transformed OBB2 to world: " + obb1World.toString(), true);
         }
         Logger.sendMessage("=== OBB INTERSECTION CHECK after the transform to world ===", true);
-        Logger.sendMessage("OBB1 (Ship): " + data1.extendedOBB.toString(), true);
-        Logger.sendMessage("OBB2 (Ground): " + data2.extendedOBB.toString(), true);
+        Logger.sendMessage("OBB1 (Ship): " + obb1World.toString(), true);
+        Logger.sendMessage("OBB2 (Ground): " + obb2World.toString(), true);
 
         boolean intersects = obb1World.intersects(obb2World);
         Logger.sendMessage("OBB Intersection result: " + intersects, true);
@@ -589,19 +589,30 @@ public class MultiblockManager {
     }
 
     private float calculateAlignmentPercent(MultiblockTransferData exporter, MultiblockTransferData importer) {
-        AABB exporterAABB = exporter.extendedOBB;
-        AABB importerAABB = importer.extendedOBB;
+        // Get proper OBB coordinates - transform ship multiblocks to world coordinates
+        AABB exporterAABB = getWorldOBB(exporter);
+        AABB importerAABB = getWorldOBB(importer);
+
         Direction facing = exporter.worldFacing;
 
         float alignment;
+
         if (facing.getAxis().isHorizontal()) {
             // Horizontal transfer - check Y alignment
             double overlapY = Math.min(exporterAABB.maxY, importerAABB.maxY) -
                     Math.max(exporterAABB.minY, importerAABB.minY);
-            double maxHeight = Math.max(exporterAABB.getYsize(), importerAABB.getYsize());
-            alignment = (float) Math.max(0, (overlapY / maxHeight) * 100.0);
-            Logger.sendMessage(String.format("  Horizontal alignment: overlapY=%.1f, maxHeight=%.1f, alignment=%.1f%%",
-                    overlapY, maxHeight, alignment), true);
+            double exporterHeight = exporterAABB.getYsize();
+            double importerHeight = importerAABB.getYsize();
+            double minHeight = Math.min(exporterHeight, importerHeight);
+
+            if (minHeight <= 0 || overlapY <= 0) {
+                alignment = 0;
+            } else {
+                alignment = (float) Math.max(0, Math.min(100, (overlapY / minHeight) * 100.0));
+            }
+
+            Logger.sendMessage(String.format("  Horizontal alignment: overlapY=%.3f, minHeight=%.3f, alignment=%.1f%%",
+                    overlapY, minHeight, alignment), true);
         } else {
             // Vertical transfer - check XZ alignment
             double overlapX = Math.min(exporterAABB.maxX, importerAABB.maxX) -
@@ -609,17 +620,40 @@ public class MultiblockManager {
             double overlapZ = Math.min(exporterAABB.maxZ, importerAABB.maxZ) -
                     Math.max(exporterAABB.minZ, importerAABB.minZ);
 
-            double exporterArea = exporterAABB.getXsize() * exporterAABB.getZsize();
-            double importerArea = importerAABB.getXsize() * importerAABB.getZsize();
-            double minArea = Math.min(exporterArea, importerArea);
+            // Only proceed if there's positive overlap
+            if (overlapX <= 0 || overlapZ <= 0) {
+                alignment = 0;
+                Logger.sendMessage(String.format("  Vertical alignment: NO OVERLAP (overlapX=%.3f, overlapZ=%.3f)",
+                        overlapX, overlapZ), true);
+            } else {
+                double exporterArea = exporterAABB.getXsize() * exporterAABB.getZsize();
+                double importerArea = importerAABB.getXsize() * importerAABB.getZsize();
+                double minArea = Math.min(exporterArea, importerArea);
 
-            double overlapArea = overlapX * overlapZ;
-            alignment = (float) Math.max(0, (overlapArea / minArea) * 100.0);
-            Logger.sendMessage(String.format("  Vertical alignment: overlapArea=%.1f, minArea=%.1f, alignment=%.1f%%",
-                    overlapArea, minArea, alignment), true);
+                if (minArea <= 0) {
+                    alignment = 0;
+                } else {
+                    double overlapArea = overlapX * overlapZ;
+                    alignment = (float) Math.max(0, Math.min(100, (overlapArea / minArea) * 100.0));
+                }
+
+                Logger.sendMessage(String.format("  Vertical alignment: overlapX=%.3f, overlapZ=%.3f, overlapArea=%.3f, minArea=%.3f, alignment=%.1f%%",
+                        overlapX, overlapZ, overlapX * overlapZ, minArea, alignment), true);
+            }
         }
 
         return alignment;
+    }
+
+    // Helper method to get OBB in world coordinates
+    private AABB getWorldOBB(MultiblockTransferData data) {
+        if (data.isOnShip && data.shipId != null) {
+            // Transform ship OBB to world coordinates
+            return transformOBBToWorld(data);
+        } else {
+            // Ground multiblock - use OBB as-is (already in world coordinates)
+            return data.extendedOBB;
+        }
     }
 
     private int calculateTransferAmount(MultiblockTransferData exporter, MultiblockTransferData importer, float alignmentPercent) {
@@ -630,10 +664,10 @@ public class MultiblockManager {
         int blockBonus = Math.min(exporter.blockCount, importer.blockCount) * baseTransferRate;
 
         // Total transfer per cycle
-        int baseTransfer = baseTransferRate + blockBonus;
+
 
         // Apply alignment efficiency
-        int actualTransfer = (int) (baseTransfer * (alignmentPercent / 100.0));
+        int actualTransfer = (int) (blockBonus * (alignmentPercent / 100.0));
 
         // Minimum transfer if there's any alignment
         if (alignmentPercent > 0 && actualTransfer < baseTransferRate) {
